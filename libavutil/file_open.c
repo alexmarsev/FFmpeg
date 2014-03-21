@@ -44,6 +44,20 @@ static int win32_open(const char *filename_utf8, int oflag, int pmode)
     int num_chars;
     wchar_t *filename_w;
 
+    HANDLE file_handle;
+
+    const DWORD flags_access = (oflag & O_RDONLY) ? GENERIC_READ :
+                               (oflag & O_WRONLY) ? GENERIC_WRITE :
+                               GENERIC_READ | GENERIC_READ;
+
+    const DWORD flags_share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+    const DWORD create_type = (oflag & (O_CREAT | O_TRUNC)) ? CREATE_ALWAYS :
+                              (oflag & (O_CREAT | O_EXCL)) ? CREATE_NEW :
+                              (oflag & O_TRUNC) ? TRUNCATE_EXISTING :
+                              (oflag & O_CREAT) ? OPEN_ALWAYS :
+                              OPEN_EXISTING;
+
     /* convert UTF-8 to wide chars */
     num_chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, filename_utf8, -1, NULL, 0);
     if (num_chars <= 0)
@@ -55,15 +69,22 @@ static int win32_open(const char *filename_utf8, int oflag, int pmode)
     }
     MultiByteToWideChar(CP_UTF8, 0, filename_utf8, -1, filename_w, num_chars);
 
-    fd = _wsopen(filename_w, oflag, SH_DENYNO, pmode);
+    file_handle = CreateFileW(filename_w, flags_access, flags_share, 0, create_type, 0, 0);
     av_freep(&filename_w);
+    fd = _open_osfhandle((intptr_t)file_handle, oflag);
+    if (fd == -1)
+        CloseHandle(file_handle);
 
     if (fd != -1 || (oflag & O_CREAT))
         return fd;
 
 fallback:
     /* filename may be in CP_ACP */
-    return _sopen(filename_utf8, oflag, SH_DENYNO, pmode);
+    file_handle = CreateFileA(filename_utf8, flags_access, flags_share, 0, create_type, 0, 0);
+    fd = _open_osfhandle((intptr_t)file_handle, oflag);
+    if (fd == -1)
+        CloseHandle(file_handle);
+    return fd;
 }
 #define open win32_open
 #endif
